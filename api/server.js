@@ -1,6 +1,5 @@
 'use strict';
 
-const Redis = require('ioredis');
 const express = require('express');
 const { Pool, Client } = require("pg");
 const cors = require('cors');
@@ -19,39 +18,14 @@ const HOST = '0.0.0.0';
   };
   console.log(credentials)
 
-  if (process.env.REDIS_HOST === "localhost"){
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  }
-
-  let redis;
-  try {
-    redis = new Redis({
-      port: process.env.REDIS_PORT,
-      host: process.env.REDIS_HOST,
-      tls: {},
-    });
-  } catch (e) {
-    console.log(e);
-  }
-
 // App
 const app = express();
 app.use(cors());
 
 app.get('/',  (req, res) => {
+  console.log('/ endpoint please!');
   res.send({"message": `I am the api running on port ${process.env.PORT}`});
 });
-
-
-app.get('/redis/put/:key/:value', async (req, res) => {
-  await redis.set(req.params.key, req.params.value);
-  res.send({"message": `I wrote ${req.params.key}:${req.params.value} for you`});
-});
-app.get('/redis/get/:key', async (req, res) => {
-  const value = await redis.get(req.params.key);
-  res.send({"message": `I grabbed ${req.params.key}:${value} for you`});
-});
-
 
 app.get('/pg/init', async (req, res) => {
   console.log('Init pg');
