@@ -2,7 +2,6 @@
 // import * as cdk from 'aws-cdk-lib';
 import { Stack, StackProps, CfnOutput, Aws } from 'aws-cdk-lib';
 import { aws_ec2 as ec2 } from 'aws-cdk-lib';
-import { aws_elasticache as elasticache } from 'aws-cdk-lib';
 import { aws_rds as rds } from 'aws-cdk-lib';
 import { aws_ecr_assets as ecs_assets } from 'aws-cdk-lib';
 import * as apprunner from '@aws-cdk/aws-apprunner-alpha';
@@ -13,7 +12,7 @@ export class CdkRedisExampleStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // Create VPC for use with Redis/Postgres
+    // Create VPC for use with Postgres
     const appVpc = new ec2.Vpc(this, `AppVpc-${id}`, {
       cidr: "11.192.0.0/16",
       maxAzs: 2,
@@ -46,44 +45,6 @@ export class CdkRedisExampleStack extends Stack {
     appVpc.publicSubnets.forEach(function(value){
       publicSubnets.push(value.subnetId)
     });
-
-    const elastiCacheSecurityGroup = new ec2.SecurityGroup(this, `ElastiCacheSG-${id}`, {
-      vpc: appVpc,
-      description: 'SecurityGroup associated with the ElastiCache Redis Cluster',
-      securityGroupName: 'ElastiCacheSG'
-      // securityGroupName: `ElastiCacheSG-${id}`
-
-    });
-
-    new ec2.CfnSecurityGroupIngress(this, `ElastiCacheSGIngress-${id}`, {
-      groupId: elastiCacheSecurityGroup.securityGroupId,
-      ipProtocol: 'tcp',
-      toPort: 6379,
-      fromPort: 6379,
-      sourceSecurityGroupId: elastiCacheSecurityGroup.securityGroupId
-    });
-
-    const ecSubnetGroup = new elasticache.CfnSubnetGroup(this, `ElastiCacheSubnetGroup-${id}`, {
-      description: 'Elasticache Subnet Group',
-      subnetIds: isolatedSubnets,
-      cacheSubnetGroupName: `RedisSubnetGroup-${id}`
-    });
-
-
-    const elastiCacheCluster = new elasticache.CfnReplicationGroup(this, `redisCacheCluster-${id}`, {
-      replicationGroupDescription: `Redis Cluster - ${id}`,
-      cacheNodeType: 'cache.t4g.small',
-      engine: "redis",
-      engineVersion: '6.x',
-      multiAzEnabled: true,
-      numNodeGroups: 1,
-      replicasPerNodeGroup: 1,
-      cacheSubnetGroupName: ecSubnetGroup.cacheSubnetGroupName,
-      securityGroupIds: [elastiCacheSecurityGroup.securityGroupId],
-      atRestEncryptionEnabled: true,
-      transitEncryptionEnabled: true,
-    })
-
 
 
 
@@ -141,14 +102,6 @@ export class CdkRedisExampleStack extends Stack {
       sourceSecurityGroupId: bastionSecurityGroup.securityGroupId
     });
 
-    new ec2.CfnSecurityGroupIngress(this, `ElastiCacheSGIngressBastion-${id}`, {
-      groupId: elastiCacheSecurityGroup.securityGroupId,
-      ipProtocol: 'tcp',
-      toPort: 6379,
-      fromPort: 6379,
-      sourceSecurityGroupId: bastionSecurityGroup.securityGroupId
-    });
-
 
     const bastionHostLinux = new ec2.BastionHostLinux(this, `BastionInstance-${id}`, {
       vpc: appVpc,
@@ -162,14 +115,9 @@ export class CdkRedisExampleStack extends Stack {
     ` --target ${bastionHostLinux.instanceId}`+
     ` --document-name AWS-StartPortForwardingSessionToRemoteHost` +
     ` --parameters '{"host":["${cluster.clusterEndpoint.hostname}"],"portNumber":["5432"], "localPortNumber":["5433"]}'`
-    const sshTunnelCommandEC = `aws ssm start-session`+
-    ` --target ${bastionHostLinux.instanceId}`+
-    ` --document-name AWS-StartPortForwardingSessionToRemoteHost` +
-    ` --parameters '{"host":["${elastiCacheCluster.attrPrimaryEndPointAddress}"],"portNumber":["6379"], "localPortNumber":["6380"]}'`
 
 
     new CfnOutput(this, `sshTunnelCommandRds-${id}`, { value: sshTunnelCommandRds });
-    new CfnOutput(this, `sshTunnelCommandEC-${id}`, { value: sshTunnelCommandEC });
 
 
     const vpcConnector = new apprunner.VpcConnector(this, `AppRunnerVpcConnector-${id}`, {
@@ -177,35 +125,10 @@ export class CdkRedisExampleStack extends Stack {
       vpcSubnets: appVpc.selectSubnets({subnetType: ec2.SubnetType.PRIVATE_ISOLATED}),
       // vpcConnectorName: `AppRunnerVpcConnector-${id}`,
       vpcConnectorName: `AppRunnerVpcConnector`,
-      securityGroups: [rdsSecurityGroup, elastiCacheSecurityGroup]
+      securityGroups: [rdsSecurityGroup]
     });
 
 
-    const imageAsset = new ecs_assets.DockerImageAsset(this, 'apiImage', {
-      directory: path.join(__dirname, '..','./api')
-    });
-
-    // should use secrets manager instead of env variables... but we'll figure that out later.
-    const appRunnerFromAssets = new apprunner.Service(this, `BackendAppFromAssets-${id}`, {
-      serviceName: `AppFromAssets-${id}`,
-      vpcConnector,
-      source: apprunner.Source.fromAsset({
-        imageConfiguration: {
-          port: 8080,
-          environment: {
-            "PG_HOST": cluster.secret?.secretValueFromJson("host").toString() || cluster.clusterEndpoint.hostname,
-            "PG_PORT": cluster.secret?.secretValueFromJson("port").toString() || "5432",
-            "PG_DATABASE": cluster.secret?.secretValueFromJson("dbname").toString() || "app",
-            "PG_USER": cluster.secret?.secretValueFromJson("username").toString() || "postgres",
-            "PG_PASSWORD": cluster.secret?.secretValueFromJson("password").toString() || "",
-            "REDIS_HOST": elastiCacheCluster.attrPrimaryEndPointAddress,
-            "REDIS_PORT": elastiCacheCluster.attrPrimaryEndPointPort
-          }
-        },
-        asset: imageAsset
-
-      })
-    });
 
 
 
@@ -230,52 +153,11 @@ export class CdkRedisExampleStack extends Stack {
             "PG_PORT": cluster.secret?.secretValueFromJson("port").toString() || "5432",
             "PG_DATABASE": cluster.secret?.secretValueFromJson("dbname").toString() || "app",
             "PG_USER": cluster.secret?.secretValueFromJson("username").toString() || "postgres",
-            "PG_PASSWORD": cluster.secret?.secretValueFromJson("password").toString() || "",
-            "REDIS_HOST": elastiCacheCluster.attrPrimaryEndPointAddress,
-            "REDIS_PORT": elastiCacheCluster.attrPrimaryEndPointPort
+            "PG_PASSWORD": cluster.secret?.secretValueFromJson("password").toString() || ""
           }
         }
       }),
     });
-
-    new CfnOutput(this, `RedisPrimaryEndPointAddress-${id}`, {
-      value: elastiCacheCluster.attrPrimaryEndPointAddress,
-    });
-
-    new CfnOutput(this, `RedisPrimaryEndPointPort-${id}`, {
-      value: elastiCacheCluster.attrPrimaryEndPointPort,
-    });
-
-    // new CfnOutput(this, `RedisReadEndPointAddresses-${id}`, {
-    //   value: elastiCacheCluster.attrReadEndPointAddresses,
-    // });
-
-    // new CfnOutput(this, `RedisReadEndPointPortsList-${id}`, {
-    //   value: elastiCacheCluster.attrReadEndPointPorts,
-    // });
-
-    /*
-    // If you only want a single instance with no replication
-    const elastiCacheCluster = new elasticache.CfnCacheCluster(this, `V2redisCacheCluster-${id}`, {
-      clusterName: 'Redis Cluster',
-      cacheNodeType: 'cache.t4g.small',
-      engine: 'redis',
-      autoMinorVersionUpgrade: true,
-      numCacheNodes: 1,
-      azMode: 'cross-az',
-      cacheSubnetGroupName: ecSubnetGroup.cacheSubnetGroupName,
-      vpcSecurityGroupIds: [elastiCacheSecurityGroup.securityGroupId]
-    })
-
-    new CfnOutput(this, `V2RedisEndpointAddress-${id}`, {
-      value: elastiCacheCluster.attrRedisEndpointAddress,
-    });
-    new CfnOutput(this, `V2RedisEndpointPort-${id}`, {
-      value: elastiCacheCluster.attrRedisEndpointPort,
-    });
-    */
-
-    elastiCacheCluster.node.addDependency(ecSubnetGroup)
 
     // Output the VPC ID
     new CfnOutput(this, `AppVpcId-${id}`, {
