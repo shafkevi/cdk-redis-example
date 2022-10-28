@@ -217,7 +217,7 @@ export class CdkRedisExampleStack extends Stack {
         // These would be changed to your repository
         // Should update it to self reference this repository.
         repositoryUrl: 'https://github.com/shafkevi/cdk-redis-example',
-        branch: 'redis',
+        branch: 'pg-only',
         configurationSource: apprunner.ConfigurationSourceType.API,
         connection: apprunner.GitHubConnection.fromConnectionArn(process.env.GITHUB_CONNECTION_ARN || ''),
         codeConfigurationValues: {
