@@ -27,6 +27,11 @@ app.get('/',  (req, res) => {
   res.send({"message": `I am the api running on port ${process.env.PORT}`});
 });
 
+app.get('/upload',  (req, res) => {
+  console.log('/upload please!');
+  res.send({"message": `Eventually I will return a pre-signed S3 URL`});
+});
+
 app.get('/pg/init', async (req, res) => {
   console.log('Init pg');
   const pgClient = new Client(credentials);
