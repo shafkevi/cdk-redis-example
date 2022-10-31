@@ -1,9 +1,8 @@
 
 // import * as cdk from 'aws-cdk-lib';
-import { Stack, StackProps, CfnOutput, Aws } from 'aws-cdk-lib';
+import { Stack, StackProps, CfnOutput, aws_apprunner, aws_iam } from 'aws-cdk-lib';
 import { aws_ec2 as ec2 } from 'aws-cdk-lib';
 import { aws_rds as rds } from 'aws-cdk-lib';
-import { aws_ecr_assets as ecs_assets } from 'aws-cdk-lib';
 import * as apprunner from '@aws-cdk/aws-apprunner-alpha';
 import { Construct } from 'constructs';
 const path = require('path');
@@ -53,8 +52,6 @@ export class CdkRedisExampleStack extends Stack {
       vpc: appVpc,
       description: 'SecurityGroup associated with the RDS Cluster',
       securityGroupName: `DatabaseSG`
-      // securityGroupName: `DatabaseSG-${id}`
-
     });
     new ec2.CfnSecurityGroupIngress(this, `DatabaseSGIngress-${id}`, {
       groupId: rdsSecurityGroup.securityGroupId,
@@ -80,7 +77,8 @@ export class CdkRedisExampleStack extends Stack {
       defaultDatabaseName: "app",
       instances: 2,
       instanceProps: {
-        instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE3, ec2.InstanceSize.MEDIUM),
+        // Smallest supported instance type (~$50/month/instance)
+        instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE4_GRAVITON, ec2.InstanceSize.MEDIUM),
         vpc: appVpc,
         securityGroups: [rdsSecurityGroup]
       },
@@ -111,43 +109,56 @@ export class CdkRedisExampleStack extends Stack {
       },
     });
          
+    // Command to connect to Postgres database locally
+    // Each user would need to have IAM permissions to run the SSM start-session command.
     const sshTunnelCommandRds = `aws ssm start-session`+
     ` --target ${bastionHostLinux.instanceId}`+
     ` --document-name AWS-StartPortForwardingSessionToRemoteHost` +
     ` --parameters '{"host":["${cluster.clusterEndpoint.hostname}"],"portNumber":["5432"], "localPortNumber":["5433"]}'`
 
-
     new CfnOutput(this, `sshTunnelCommandRds-${id}`, { value: sshTunnelCommandRds });
 
 
+    // Allows App Runner to connect to your VPC (database)
     const vpcConnector = new apprunner.VpcConnector(this, `AppRunnerVpcConnector-${id}`, {
       vpc: appVpc,
       vpcSubnets: appVpc.selectSubnets({subnetType: ec2.SubnetType.PRIVATE_ISOLATED}),
-      // vpcConnectorName: `AppRunnerVpcConnector-${id}`,
-      vpcConnectorName: `AppRunnerVpcConnector`,
+      vpcConnectorName: `AppRunnerVpcConnector-${id}`,
       securityGroups: [rdsSecurityGroup]
     });
 
+    const appRunnerIAMRole = new aws_iam.Role(this, '', {
+      assumedBy: new aws_iam.ServicePrincipal('apprunner.amazonaws.com'),
+    })
 
-
+    // This should be completed and made more accurate for your needs.
+    appRunnerIAMRole.addToPolicy(
+      new aws_iam.PolicyStatement({
+        actions: ['s3:PutObject', 's3:GetObject'],
+        resources: ['*'],
+      })
+    );
 
 
     // Deploy a node app from github
     const appRunnerFromGithub = new apprunner.Service(this, `BackendAppFromGithub-${id}`, {
       serviceName: `AppFromGithub-${id}`,
       vpcConnector,
+      instanceRole: appRunnerIAMRole,
       source: apprunner.Source.fromGitHub({
-        // These would be changed to your repository
-        // Should update it to self reference this repository.
+        // These would be changed to your repository that is running your node app
         repositoryUrl: 'https://github.com/shafkevi/cdk-redis-example',
         branch: 'pg-only',
         configurationSource: apprunner.ConfigurationSourceType.API,
+        // Ensure to create this github connection.
         connection: apprunner.GitHubConnection.fromConnectionArn(process.env.GITHUB_CONNECTION_ARN || ''),
         codeConfigurationValues: {
           runtime: apprunner.Runtime.NODEJS_12,
           port: "8080",
-          buildCommand: "cd api && npm install",
-          startCommand: "cd api && npm run start",
+          // these commands should reflect your node app
+          buildCommand: "mv ./api/* .; npm install",
+          startCommand: "npm run start",
+          // Should upgrade to use Secrets Manager
           environment: {
             "PG_HOST": cluster.secret?.secretValueFromJson("host").toString() || cluster.clusterEndpoint.hostname,
             "PG_PORT": cluster.secret?.secretValueFromJson("port").toString() || "5432",
@@ -159,11 +170,29 @@ export class CdkRedisExampleStack extends Stack {
       }),
     });
 
+    // Automatically run builds on push to this github repository
+    try {
+      const cfnApprunnerService = appRunnerFromGithub.node.defaultChild as aws_apprunner.CfnService;
+      cfnApprunnerService.addPropertyOverride('SourceConfiguration.AutoDeploymentsEnabled', true);
+    }
+    catch (e){
+      console.log(e);
+    }
+
     // Output the VPC ID
     new CfnOutput(this, `AppVpcId-${id}`, {
       value: appVpc.vpcId,
       description: "App VPC ID",
       exportName: `AppVpcId-${id}`
+    });
+
+
+
+    // Output the AppRunner URL
+    new CfnOutput(this, `AppRunnerURL-${id}`, {
+      value: appRunnerFromGithub.serviceUrl,
+      description: "AppRunnerURL",
+      exportName: `AppRunnerURL-${id}`
     });
 
 

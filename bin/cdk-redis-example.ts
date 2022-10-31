@@ -4,7 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import { CdkRedisExampleStack } from '../lib/cdk-redis-example-stack';
 
 const app = new cdk.App();
-new CdkRedisExampleStack(app, 'CDKExample-1027', {
+new CdkRedisExampleStack(app, 'CDKExample', {
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
    * but a single synthesized template can be deployed anywhere. */
