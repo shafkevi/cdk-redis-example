@@ -32,6 +32,11 @@ app.get('/upload',  (req, res) => {
   res.send({"message": `Eventually I will return a pre-signed S3 URL`});
 });
 
+app.get('/download',  (req, res) => {
+  console.log('/upload please!');
+  res.send({"message": `Eventually I will return a pre-signed S3 URL`});
+});
+
 app.get('/pg/init', async (req, res) => {
   console.log('Init pg');
   const pgClient = new Client(credentials);
